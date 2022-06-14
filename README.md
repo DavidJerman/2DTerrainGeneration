@@ -6,7 +6,7 @@ So far the program creates land and populates it with tress.
 The visualisation was handled by a simple-to-use library called [Pixel Game Engine](https://github.com/OneLoneCoder/olcPixelGameEngine).
 
 ### TODO
-* Add a water
+* ~~Add a water~~
 * Add clouds
 * Improve terrain smoothing algorithm
 
