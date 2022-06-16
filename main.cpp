@@ -18,9 +18,34 @@ namespace res {
                 : x(x), y(y), radius(r), height(h), width(w), barkColor(barkColor), leafColor(leafColor) {}
     };
 
+    struct CloudPart {
+        int x;
+        int y;
+        int r;
+        olc::Pixel color;
+
+        CloudPart(int x, int y, int r, uint32_t color) : x(x), y(y), r(r), color(color) {}
+    };
+
+    struct Cloud {
+        int x;
+        int y;
+        std::vector<CloudPart *> cloudParts;
+
+        Cloud(int x, int y) : x(x), y(y) {}
+
+        ~Cloud() {
+            for (auto &cloudPart: cloudParts)
+                delete cloudPart;
+            cloudParts.clear();
+        }
+    };
+
     typedef std::vector<Tree *> TreeList;
 
     typedef std::vector<double> NoiseArray;
+
+    typedef std::vector<Cloud *> CloudList;
 }
 
 class ResourceContainer {
@@ -35,21 +60,26 @@ private:
             0xff2aa220, 0xff2aa23a, 0xff2bc311, 0xff143a69
     };
     uint32_t waterColor = 0xffb0811e;
+    uint32_t cloudColor = 0xffffffff;
 public:
     ResourceContainer() = default;
 
     ~ResourceContainer() = default;
 
-    uint32_t getEarthColor(int index) {
+    [[nodiscard]] uint32_t getEarthColor(int index) const {
         return earthColorPalette[index];
     }
 
-    uint32_t getTreeColor(int index) {
+    [[nodiscard]] uint32_t getTreeColor(int index) const {
         return treeColorPalette[index];
     }
 
-    uint32_t getWaterColor() {
+    [[nodiscard]] uint32_t getWaterColor() const {
         return waterColor;
+    }
+
+    [[nodiscard]] uint32_t getCloudColor() const {
+        return cloudColor;
     }
 };
 
@@ -94,11 +124,27 @@ class World : public olc::PixelGameEngine {
     uint32_t seed = 0;
     res::NoiseArray noiseArray;
     res::TreeList treeList;
+    res::CloudList cloudList;
 
     static const int UPPER_BOUND = 200;
     static const int LOWER_BOUND = 800;
+
     static const int TREE_FREQ = 120;
     static const int TREE_BARK_HIDE_OFFSET = 15;
+
+    static const int CLOUD_FREQ = 200;
+
+    static const int CLOUD_PART_RADIUS_MIN = 10;
+    static const int CLOUD_PART_RADIUS_MAX = 28;
+
+    static const int CLOUD_UPPER_BOUND = 50;
+    static const int CLOUD_LOWER_BOUND = 145;
+
+    static const int N_CLOUD_PARTICLES_MIN = 12;
+    static const int N_CLOUD_PARTICLES_MAX = 20;
+
+    static const int X_CLOUD_PARTICLE_RANGE = 45;
+    static const int Y_CLOUD_PARTICLE_RANGE = 12;
 
     double minLandHeight{};
     double maxLandHeight{};
@@ -117,8 +163,11 @@ public:
         noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 8);
         for (auto &tree: treeList)
             delete tree;
+        for (auto &cloud: cloudList)
+        delete cloud;
         ResourceContainer resources;
-        treeList = getTreeList(ScreenWidth(), TREE_FREQ, noiseArray, resources, rnd);
+        treeList = getTreeList(TREE_FREQ, noiseArray, resources, rnd);
+        cloudList = getCloudList(CLOUD_FREQ, resources, rnd);
         return true;
     }
 
@@ -134,7 +183,10 @@ public:
             noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 12);
             for (auto &tree: treeList)
                 delete tree;
-            treeList = getTreeList(ScreenWidth(), TREE_FREQ, noiseArray, resources, rnd);
+            for (auto &cloud: cloudList)
+                delete cloud;
+            treeList = getTreeList(TREE_FREQ, noiseArray, resources, rnd);
+            cloudList = getCloudList(CLOUD_FREQ, resources, rnd);
         }
 
         // If c is held, generate a new seed and regenerate the noise array repeatedly
@@ -144,7 +196,7 @@ public:
             noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 12);
             for (auto &tree: treeList)
                 delete tree;
-            treeList = getTreeList(ScreenWidth(), TREE_FREQ, noiseArray, resources, rnd);
+            treeList = getTreeList(TREE_FREQ, noiseArray, resources, rnd);
         }
 
         // Draw the sky
@@ -171,8 +223,7 @@ public:
                 if (j > 12 && j < 45) {
                     if (isWater) index = 4;
                     else index = 2;
-                }
-                else if (j <= 12) {
+                } else if (j <= 12) {
                     if (isWater) index = 5;
                     else index = 3;
                 }
@@ -191,11 +242,15 @@ public:
             }
         }
 
+        // Draw the clouds
+        for (const auto &cloud: cloudList)
+            drawCloud(cloud);
+
         // Post-processing
         for (int i = 0; i < ScreenWidth(); i++) {
-            int y = (int)noiseArray[i];
+            int y = (int) noiseArray[i];
             if (y > waterBoundHeight - 5 && y < waterBoundHeight + 5) {
-                // TODO: Smooth out the terrain transmission
+                // TODO: Smooth out the terrain transition
             }
         }
 
@@ -206,7 +261,7 @@ public:
     getNoiseArray(size_t size, Lehmer32 &lehmer, const int startRangeFrom, const int startRangeTo, const int range = 2,
                   const double SMOOTH_FACTOR = 8, const double VEL_RATIO = -1.0) {
 
-        res::NoiseArray noiseArr (size);
+        res::NoiseArray noiseArr(size);
         noiseArr[0] = lehmer.rndInt(startRangeFrom, startRangeTo);
 
         double vel = 0;
@@ -254,7 +309,7 @@ public:
 
         avgLandHeight /= noiseArr.size();
 
-        waterBoundHeight = (int)((2 *avgLandHeight + maxLandHeight) / 3);
+        waterBoundHeight = (int) ((2 * avgLandHeight + maxLandHeight) / 3);
 
         return noiseArr;
     }
@@ -267,7 +322,7 @@ public:
     }
 
     res::TreeList
-    getTreeList(int size, int frequency, res::NoiseArray &noiseArr, ResourceContainer &resources, Lehmer32 &rnd) {
+    getTreeList(int frequency, res::NoiseArray &noiseArr, ResourceContainer &resources, Lehmer32 &rnd) {
         res::TreeList tList;
         int x = 40;
         x += rnd.rndInt(frequency / 2, frequency / 2 * 3);
@@ -287,11 +342,43 @@ public:
         }
         return tList;
     }
+
+    void
+    drawCloud(const res::Cloud *cloud) {
+        for (const auto &cloudPart: cloud->cloudParts) {
+            FillCircle(cloudPart->x, cloudPart->y, cloudPart->r, cloudPart->color);
+        }
+    }
+
+    res::CloudList
+    getCloudList(int frequency, ResourceContainer &resources, Lehmer32 &rnd) {
+        res::CloudList cList;
+        int x = 60;
+        x += rnd.rndInt(frequency / 2, frequency / 2 * 5);
+        while (x < ScreenWidth() - 60) {
+            int y = rnd.rndInt(CLOUD_UPPER_BOUND, CLOUD_LOWER_BOUND);
+            cList.push_back(getCloud(rnd.rndInt(N_CLOUD_PARTICLES_MIN, N_CLOUD_PARTICLES_MAX), x, y, rnd, resources));
+            x += rnd.rndInt(frequency / 2, frequency / 2 * 5);
+        }
+        return cList;
+    }
+
+    static res::Cloud *
+    getCloud(int nParticles, int x, int y, Lehmer32 &rnd, ResourceContainer &resources) {
+        auto cloudPtr = new res::Cloud(x, y);
+        while (nParticles-- > 0) {
+            cloudPtr->cloudParts.push_back(
+                    new res::CloudPart(x + rnd.rndInt(-X_CLOUD_PARTICLE_RANGE, +X_CLOUD_PARTICLE_RANGE),
+                                       y + rnd.rndInt(-Y_CLOUD_PARTICLE_RANGE, +Y_CLOUD_PARTICLE_RANGE),
+                                       rnd.rndInt(CLOUD_PART_RADIUS_MIN, CLOUD_PART_RADIUS_MAX),
+                                       resources.getCloudColor()));
+        }
+        return cloudPtr;
+    }
 };
 
 int main() {
-
-    if (World demo; demo.Construct(1864, 1024, 1, 1))
+    if (World demo; demo.Construct(1864, 920, 1, 1))
         demo.Start();
 
     return 0;

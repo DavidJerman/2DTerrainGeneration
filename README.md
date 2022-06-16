@@ -7,7 +7,7 @@ The visualisation was handled by a simple-to-use library called [Pixel Game Engi
 
 ### TODO
 * ~~Add a water~~
-* Add clouds
+* ~~Add clouds~~
 * Improve terrain smoothing algorithm
 
 ### Libraries used
