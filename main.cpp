@@ -2,6 +2,7 @@
 
 #include "olcPixelGameEngine.h"
 #include <vector>
+#include <chrono>
 
 namespace res {
 
@@ -160,7 +161,7 @@ public:
     bool OnUserCreate() override {
         // On create, create the noise array
         Lehmer32 rnd(seed);
-        noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 8);
+        noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 30);
         for (auto &tree: treeList)
             delete tree;
         for (auto &cloud: cloudList)
@@ -178,9 +179,10 @@ public:
 
         // If space is pressed, generate a new seed and regenerate the noise array
         if (GetKey(olc::SPACE).bPressed) {
-            seed += 1;
+            // Picks a seed based on time
+            seed = std::chrono::system_clock::now().time_since_epoch().count();
             Lehmer32 rnd(seed);
-            noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 12);
+            noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 30);
             for (auto &tree: treeList)
                 delete tree;
             for (auto &cloud: cloudList)
@@ -191,9 +193,9 @@ public:
 
         // If c is held, generate a new seed and regenerate the noise array repeatedly
         if (GetKey(olc::C).bHeld) {
-            seed += 1;
+            seed = std::chrono::system_clock::now().time_since_epoch().count();
             Lehmer32 rnd(seed);
-            noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 12);
+            noiseArray = getNoiseArray(ScreenWidth(), rnd, 100, ScreenHeight() - 100, 2, 30);
             for (auto &tree: treeList)
                 delete tree;
             treeList = getTreeList(TREE_FREQ, noiseArray, resources, rnd);
@@ -290,6 +292,8 @@ public:
             int c = 0;
             for (int k = 0; k < SMOOTH_FACTOR && (j - k) > 0; k++, c++)
                 avg += noiseArr[j - k];
+            for (int k = -5; k < SMOOTH_FACTOR && (j + k) < size && (j + k) >= 0; k++, c++)
+                avg += noiseArr[j + k];
             if (c)
                 avg /= c;
             else
